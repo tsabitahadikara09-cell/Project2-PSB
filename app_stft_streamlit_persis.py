@@ -214,7 +214,7 @@ def compute_stft(x, fs, width, overlap, jumlah_window, window_type):
     win = get_window(window_type, width)
 
     specs = []
-    times = []
+    sample_positions = []
 
     for i in range(jumlah_window):
         start = i * step
@@ -228,12 +228,14 @@ def compute_stft(x, fs, width, overlap, jumlah_window, window_type):
         mag = np.abs(np.fft.rfft(segment_windowed)) / width
 
         specs.append(mag)
-        times.append((start + width / 2) / fs)
+
+        # Sumbu X STFT memakai n sample, bukan waktu
+        sample_positions.append(start + width // 2)
 
     specs = np.array(specs).T
     freqs = np.fft.rfftfreq(width, d=1 / fs)
 
-    return np.array(times), freqs, specs
+    return np.array(sample_positions), freqs, specs
 
 
 # ============================================================
@@ -305,7 +307,7 @@ def fig_windowed(n, x, width_win, overlap, w_index, window_type, jumlah_window):
 
     ax.axhline(0, color="black", linewidth=0.8)
     ax.set_title(
-        f"Sinyal Hasil Windowing (Overlap w={w_index}, {w_index + 1}, {w_index + 2})",
+        f"Sinyal Hasil Windowing Overlap w={w_index}, {w_index + 1}, {w_index + 2}",
         fontsize=11
     )
     ax.set_xlabel("n sample", fontsize=8)
@@ -318,27 +320,35 @@ def fig_windowed(n, x, width_win, overlap, w_index, window_type, jumlah_window):
     return fig
 
 
-def fig_specgram(times, freqs, spec):
+def fig_specgram(sample_positions, freqs, spec, fs):
     fig, ax = plt.subplots(figsize=(6.3, 4.1), dpi=120)
 
-    im = ax.pcolormesh(times, freqs, spec, shading="auto", cmap="jet")
-    ax.set_xlabel("Waktu (s)")
-    ax.set_ylabel("Frekuensi (Hz)")
-    ax.set_ylim(0, min(500, max(freqs) if len(freqs) > 0 else 500))
+    im = ax.pcolormesh(
+        sample_positions,
+        freqs,
+        spec,
+        shading="auto",
+        cmap="jet"
+    )
 
-    fig.colorbar(im, ax=ax)
+    ax.set_title("STFT 2D Spectrogram", fontsize=11)
+    ax.set_xlabel("n sample")
+    ax.set_ylabel("Frekuensi (Hz)")
+    ax.set_ylim(0, fs / 2)
+
+    fig.colorbar(im, ax=ax, label="Magnitude")
     fig.tight_layout()
     return fig
 
 
-def fig_3d(times, freqs, spec):
+def fig_3d(sample_positions, freqs, spec, fs):
     fig = plt.figure(figsize=(6.3, 4.1), dpi=120)
     ax = fig.add_subplot(111, projection="3d")
 
-    T, F = np.meshgrid(times, freqs)
+    N, F = np.meshgrid(sample_positions, freqs)
 
     ax.plot_surface(
-        T,
+        N,
         F,
         spec,
         cmap="jet",
@@ -346,9 +356,11 @@ def fig_3d(times, freqs, spec):
         antialiased=True
     )
 
-    ax.set_xlabel("Waktu (s)", fontsize=8)
+    ax.set_title("STFT 3D Spectrogram", fontsize=11)
+    ax.set_xlabel("n sample", fontsize=8)
     ax.set_ylabel("Frekuensi (Hz)", fontsize=8)
     ax.set_zlabel("Magnitude", fontsize=8)
+    ax.set_ylim(0, fs / 2)
     ax.view_init(elev=28, azim=-55)
 
     fig.tight_layout()
@@ -394,7 +406,7 @@ st.sidebar.button("Proses Data")
 
 
 # ============================================================
-# LOAD DATA DULU SUPAYA JUMLAH DATA AKTUAL DIKETAHUI
+# LOAD DATA
 # ============================================================
 
 fs = int(fs)
@@ -612,7 +624,7 @@ with col4:
         use_container_width=True
     )
 
-times, freqs, spec = compute_stft(
+sample_positions, freqs, spec = compute_stft(
     x_process,
     fs,
     lebar_window,
@@ -626,13 +638,13 @@ col5, col6 = st.columns([1.15, 1])
 with col5:
     st.markdown("### 2D Spectrogram")
     st.pyplot(
-        fig_specgram(times, freqs, spec),
+        fig_specgram(sample_positions, freqs, spec, fs),
         use_container_width=True
     )
 
 with col6:
     st.markdown("### 3D Spectrogram")
     st.pyplot(
-        fig_3d(times, freqs, spec),
+        fig_3d(sample_positions, freqs, spec, fs),
         use_container_width=True
     )
