@@ -71,6 +71,10 @@ hr {
 """, unsafe_allow_html=True)
 
 
+# ============================================================
+# FUNGSI DATA
+# ============================================================
+
 def generate_signal(n_data, fs):
     n = np.arange(n_data)
     t = n / fs
@@ -95,18 +99,23 @@ def generate_ecg_like(n_data, fs):
     x = 0.05 * np.sin(2 * np.pi * 0.5 * t)
 
     rr = int(fs * 0.8)
-    for r in range(int(0.3 * fs), n_data, rr):
-        qrs_width = int(0.025 * fs)
-        p_width = int(0.05 * fs)
-        t_width = int(0.12 * fs)
+    if rr < 1:
+        rr = 1
 
-        for i in range(n_data):
-            x[i] += 1.0 * np.exp(-((i - r) ** 2) / (2 * qrs_width ** 2))
-            x[i] += 0.18 * np.exp(-((i - (r - int(0.18 * fs))) ** 2) / (2 * p_width ** 2))
-            x[i] += 0.30 * np.exp(-((i - (r + int(0.25 * fs))) ** 2) / (2 * t_width ** 2))
+    for r in range(int(0.3 * fs), n_data, rr):
+        qrs_width = max(1, int(0.025 * fs))
+        p_width = max(1, int(0.05 * fs))
+        t_width = max(1, int(0.12 * fs))
+
+        x += 1.0 * np.exp(-((n - r) ** 2) / (2 * qrs_width ** 2))
+        x += 0.18 * np.exp(-((n - (r - int(0.18 * fs))) ** 2) / (2 * p_width ** 2))
+        x += 0.30 * np.exp(-((n - (r + int(0.25 * fs))) ** 2) / (2 * t_width ** 2))
 
     x = x - np.mean(x)
-    x = x / np.max(np.abs(x))
+    max_val = np.max(np.abs(x))
+
+    if max_val != 0:
+        x = x / max_val
 
     return n, t, x
 
@@ -117,6 +126,11 @@ def read_ecg_file(uploaded_file):
         values = []
 
         for line in raw.splitlines():
+            line = line.strip()
+
+            if line == "":
+                continue
+
             line = line.replace(",", " ")
             parts = line.split()
 
@@ -148,7 +162,16 @@ def read_ecg_file(uploaded_file):
         return None
 
 
+# ============================================================
+# FUNGSI WINDOW, FFT, STFT
+# ============================================================
+
 def get_window(window_type, width):
+    width = int(width)
+
+    if width < 1:
+        width = 1
+
     if window_type == "Rectangular":
         return np.ones(width)
     elif window_type == "Bartlett":
@@ -159,28 +182,42 @@ def get_window(window_type, width):
         return np.hamming(width)
     elif window_type == "Blackman":
         return np.blackman(width)
+
     return np.ones(width)
 
 
 def spectrum(x, fs):
+    if len(x) < 2:
+        x = np.array([0, 0])
+
     y = np.abs(np.fft.rfft(x)) / len(x)
     f = np.fft.rfftfreq(len(x), d=1 / fs)
+
     return f, y
 
 
 def compute_stft(x, fs, width, overlap, jumlah_window, window_type):
     width = int(width)
     overlap = int(overlap)
-    step = max(1, width - overlap)
+    jumlah_window = int(jumlah_window)
 
+    if width < 2:
+        width = 2
+
+    if overlap >= width:
+        overlap = width - 1
+
+    if overlap < 0:
+        overlap = 0
+
+    step = width - overlap
     win = get_window(window_type, width)
+
     specs = []
     times = []
 
     for i in range(jumlah_window):
         start = i * step
-        end = start + width
-
         segment = np.zeros(width)
 
         if start < len(x):
@@ -199,26 +236,34 @@ def compute_stft(x, fs, width, overlap, jumlah_window, window_type):
     return np.array(times), freqs, specs
 
 
+# ============================================================
+# FUNGSI GAMBAR
+# ============================================================
+
 def fig_signal(n, x, title, width=8, height=2.7):
     fig, ax = plt.subplots(figsize=(width, height), dpi=120)
+
     ax.plot(n, x, color="red", linewidth=1)
     ax.set_title(title, fontsize=11)
     ax.set_xlabel("n sample", fontsize=8)
     ax.set_ylabel("Amplitude", fontsize=8)
     ax.grid(True, linestyle=":", linewidth=0.5)
     ax.set_ylim(-1.15, 1.15)
+
     fig.tight_layout()
     return fig
 
 
 def fig_spectrum(f, mag, title, width=4.2, height=2.7):
     fig, ax = plt.subplots(figsize=(width, height), dpi=120)
+
     ax.plot(f, mag, color="red", linewidth=1)
     ax.set_title(title, fontsize=9)
     ax.set_xlabel("Frekuensi (Hz)", fontsize=7)
     ax.set_ylabel("Magnitude", fontsize=7)
     ax.grid(True, linestyle=":", linewidth=0.5)
-    ax.set_xlim(0, 500)
+    ax.set_xlim(0, min(500, max(f) if len(f) > 0 else 500))
+
     fig.tight_layout()
     return fig
 
@@ -228,11 +273,14 @@ def fig_windowed(n, x, width_win, overlap, w_index, window_type, jumlah_window):
 
     ax.plot(n, x, color="lightgray", linewidth=0.7, alpha=0.45)
 
+    if overlap >= width_win:
+        overlap = width_win - 1
+
     step = max(1, width_win - overlap)
     win = get_window(window_type, width_win)
 
     colors = ["red", "blue", "black"]
-    labels = ["w=0", "w=1", "w=2"]
+    labels = [f"w={w_index}", f"w={w_index + 1}", f"w={w_index + 2}"]
 
     for i in range(min(3, jumlah_window)):
         start = (w_index + i) * step
@@ -257,7 +305,7 @@ def fig_windowed(n, x, width_win, overlap, w_index, window_type, jumlah_window):
 
     ax.axhline(0, color="black", linewidth=0.8)
     ax.set_title(
-        f"Sinyal Hasil Windowing (Overlap w={w_index}, {w_index+1}, {w_index+2})",
+        f"Sinyal Hasil Windowing (Overlap w={w_index}, {w_index + 1}, {w_index + 2})",
         fontsize=11
     )
     ax.set_xlabel("n sample", fontsize=8)
@@ -265,16 +313,19 @@ def fig_windowed(n, x, width_win, overlap, w_index, window_type, jumlah_window):
     ax.grid(True, linestyle=":", linewidth=0.5)
     ax.set_ylim(-1.15, 1.15)
     ax.legend(fontsize=7, loc="upper right")
+
     fig.tight_layout()
     return fig
 
 
 def fig_specgram(times, freqs, spec):
     fig, ax = plt.subplots(figsize=(6.3, 4.1), dpi=120)
+
     im = ax.pcolormesh(times, freqs, spec, shading="auto", cmap="jet")
     ax.set_xlabel("Waktu (s)")
     ax.set_ylabel("Frekuensi (Hz)")
-    ax.set_ylim(0, 500)
+    ax.set_ylim(0, min(500, max(freqs) if len(freqs) > 0 else 500))
+
     fig.colorbar(im, ax=ax)
     fig.tight_layout()
     return fig
@@ -285,19 +336,28 @@ def fig_3d(times, freqs, spec):
     ax = fig.add_subplot(111, projection="3d")
 
     T, F = np.meshgrid(times, freqs)
-    ax.plot_surface(T, F, spec, cmap="jet", linewidth=0, antialiased=True)
+
+    ax.plot_surface(
+        T,
+        F,
+        spec,
+        cmap="jet",
+        linewidth=0,
+        antialiased=True
+    )
 
     ax.set_xlabel("Waktu (s)", fontsize=8)
     ax.set_ylabel("Frekuensi (Hz)", fontsize=8)
     ax.set_zlabel("Magnitude", fontsize=8)
     ax.view_init(elev=28, azim=-55)
+
     fig.tight_layout()
     return fig
 
 
-# =========================
-# SIDEBAR
-# =========================
+# ============================================================
+# SIDEBAR - DATA
+# ============================================================
 
 st.sidebar.markdown("## Data")
 
@@ -307,15 +367,16 @@ pilih_sinyal = st.sidebar.radio(
 )
 
 uploaded_ecg = None
+
 if pilih_sinyal == "Sinyal ECG":
     uploaded_ecg = st.sidebar.file_uploader(
         "Upload Data ECG:",
         type=["txt", "csv", "dat"]
     )
 
-jumlah_data = st.sidebar.number_input(
+jumlah_data_input = st.sidebar.number_input(
     "Jumlah Data:",
-    min_value=128,
+    min_value=50,
     max_value=10000,
     value=1024,
     step=1
@@ -323,13 +384,57 @@ jumlah_data = st.sidebar.number_input(
 
 fs = st.sidebar.number_input(
     "Frek. Sampling:",
-    min_value=100,
-    max_value=5000,
+    min_value=1,
+    max_value=10000,
     value=1024,
     step=1
 )
 
 st.sidebar.button("Proses Data")
+
+
+# ============================================================
+# LOAD DATA DULU SUPAYA JUMLAH DATA AKTUAL DIKETAHUI
+# ============================================================
+
+fs = int(fs)
+jumlah_data_input = int(jumlah_data_input)
+
+if pilih_sinyal == "Sinyal Buatan":
+    n, t, x = generate_signal(jumlah_data_input, fs)
+    jumlah_data = len(x)
+
+else:
+    if uploaded_ecg is not None:
+        ecg_data = read_ecg_file(uploaded_ecg)
+
+        if ecg_data is not None:
+            x_full = ecg_data
+
+            if jumlah_data_input < len(x_full):
+                x = x_full[:jumlah_data_input]
+            else:
+                x = x_full
+
+            jumlah_data = len(x)
+            n = np.arange(jumlah_data)
+            t = n / fs
+            st.sidebar.success(f"Data ECG berhasil dibaca: {len(x_full)} data")
+
+        else:
+            st.sidebar.error("File ECG tidak bisa dibaca")
+            n, t, x = generate_ecg_like(jumlah_data_input, fs)
+            jumlah_data = len(x)
+
+    else:
+        n, t, x = generate_ecg_like(jumlah_data_input, fs)
+        jumlah_data = len(x)
+        st.sidebar.info("Belum upload ECG, memakai contoh ECG")
+
+
+# ============================================================
+# SIDEBAR - SET PANJANG DATA
+# ============================================================
 
 st.sidebar.markdown("---")
 st.sidebar.markdown("## Set Panjang Data")
@@ -339,27 +444,42 @@ mode_data = st.sidebar.radio(
     ["Full Data", "Ambil Data ke :"]
 )
 
+max_data = int(jumlah_data)
+
+default_mulai = min(280, max_data - 2)
+if default_mulai < 0:
+    default_mulai = 0
+
+default_sampai = min(579, max_data)
+if default_sampai <= default_mulai:
+    default_sampai = default_mulai + 1
+
 col_start, col_end = st.sidebar.columns(2)
 
 with col_start:
     mulai = st.number_input(
         "Mulai",
         min_value=0,
-        max_value=max(1, int(jumlah_data) - 1),
-        value=280,
+        max_value=max(1, max_data - 2),
+        value=default_mulai,
         step=1
     )
 
 with col_end:
     sampai = st.number_input(
         "Sampai",
-        min_value=1,
-        max_value=max(2, int(jumlah_data)),
-        value=579,
+        min_value=int(mulai) + 1,
+        max_value=max_data,
+        value=min(default_sampai, max_data),
         step=1
     )
 
 st.sidebar.button("Proses Potong Data")
+
+
+# ============================================================
+# SIDEBAR - WINDOWING
+# ============================================================
 
 st.sidebar.markdown("---")
 st.sidebar.markdown("## Windowing")
@@ -370,26 +490,26 @@ window_type = st.sidebar.radio(
     index=2
 )
 
-overlap = st.sidebar.number_input(
-    "Irisan (Overlap):",
-    min_value=0,
-    max_value=1000,
-    value=50,
+lebar_window = st.sidebar.number_input(
+    "Lebar Window:",
+    min_value=8,
+    max_value=max(8, max_data),
+    value=min(100, max_data),
     step=1
 )
 
-lebar_window = st.sidebar.number_input(
-    "Lebar Window:",
-    min_value=16,
-    max_value=1024,
-    value=100,
+overlap = st.sidebar.number_input(
+    "Irisan (Overlap):",
+    min_value=0,
+    max_value=max(0, int(lebar_window) - 1),
+    value=min(50, max(0, int(lebar_window) - 1)),
     step=1
 )
 
 jumlah_window = st.sidebar.number_input(
     "Jumlah Window:",
     min_value=1,
-    max_value=100,
+    max_value=200,
     value=20,
     step=1
 )
@@ -406,57 +526,31 @@ st.sidebar.button("Proses Windowing")
 st.sidebar.button("STFT")
 
 
-# =========================
-# DATA PROCESSING
-# =========================
+# ============================================================
+# PROSES POTONG DATA
+# ============================================================
 
-jumlah_data = int(jumlah_data)
-fs = int(fs)
-overlap = int(overlap)
+mulai = int(mulai)
+sampai = int(sampai)
 lebar_window = int(lebar_window)
+overlap = int(overlap)
 jumlah_window = int(jumlah_window)
-
-if pilih_sinyal == "Sinyal Buatan":
-    n, t, x = generate_signal(jumlah_data, fs)
-
-else:
-    if uploaded_ecg is not None:
-        ecg_data = read_ecg_file(uploaded_ecg)
-
-        if ecg_data is not None:
-            x = ecg_data
-            jumlah_data = len(x)
-            n = np.arange(jumlah_data)
-            t = n / fs
-            st.sidebar.success("Data ECG berhasil diupload")
-        else:
-            st.sidebar.error("File ECG tidak bisa dibaca")
-            n, t, x = generate_ecg_like(jumlah_data, fs)
-
-    else:
-        n, t, x = generate_ecg_like(jumlah_data, fs)
-        st.sidebar.info("Belum upload ECG, memakai contoh ECG")
-
+w_index = int(w_index)
 
 if mode_data == "Ambil Data ke :":
-    mulai = int(mulai)
-    sampai = int(sampai)
-
-    if sampai <= mulai:
-        sampai = mulai + 1
-
     mulai = max(0, min(mulai, len(x) - 1))
     sampai = max(mulai + 1, min(sampai, len(x)))
 
     x_process = np.zeros_like(x)
     x_process[mulai:sampai] = x[mulai:sampai]
+
 else:
     x_process = x.copy()
 
 
-# =========================
+# ============================================================
 # MAIN DISPLAY
-# =========================
+# ============================================================
 
 st.title("Time-Frequency Analysis - STFT")
 
