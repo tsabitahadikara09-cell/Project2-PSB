@@ -1,7 +1,6 @@
 import streamlit as st
 import numpy as np
 import matplotlib.pyplot as plt
-from mpl_toolkits.mplot3d import Axes3D
 
 
 st.set_page_config(
@@ -68,13 +67,6 @@ hr {
 .stSlider label {
     color: white !important;
 }
-
-.plot-card {
-    background-color: white;
-    padding: 10px;
-    border-radius: 7px;
-    margin-bottom: 18px;
-}
 </style>
 """, unsafe_allow_html=True)
 
@@ -84,14 +76,14 @@ def generate_signal(n_data, fs):
     t = n / fs
     x = np.zeros(n_data)
 
-    batas1 = n_data // 4
-    batas2 = n_data // 2
-    batas3 = 3 * n_data // 4
+    b1 = n_data // 4
+    b2 = n_data // 2
+    b3 = 3 * n_data // 4
 
-    x[:batas1] = np.sin(2 * np.pi * 50 * t[:batas1])
-    x[batas1:batas2] = np.sin(2 * np.pi * 150 * t[batas1:batas2])
-    x[batas2:batas3] = np.sin(2 * np.pi * 250 * t[batas2:batas3])
-    x[batas3:] = np.sin(2 * np.pi * 350 * t[batas3:])
+    x[:b1] = np.sin(2 * np.pi * 50 * t[:b1])
+    x[b1:b2] = np.sin(2 * np.pi * 150 * t[b1:b2])
+    x[b2:b3] = np.sin(2 * np.pi * 250 * t[b2:b3])
+    x[b3:] = np.sin(2 * np.pi * 350 * t[b3:])
 
     return n, t, x
 
@@ -99,24 +91,73 @@ def generate_signal(n_data, fs):
 def generate_ecg_like(n_data, fs):
     n = np.arange(n_data)
     t = n / fs
-    x = (
-        0.8 * np.sin(2 * np.pi * 1.2 * t)
-        + 0.25 * np.sin(2 * np.pi * 2.4 * t)
-        + 0.15 * np.sin(2 * np.pi * 50 * t)
-    )
+
+    x = 0.05 * np.sin(2 * np.pi * 0.5 * t)
+
+    rr = int(fs * 0.8)
+    for r in range(int(0.3 * fs), n_data, rr):
+        qrs_width = int(0.025 * fs)
+        p_width = int(0.05 * fs)
+        t_width = int(0.12 * fs)
+
+        for i in range(n_data):
+            x[i] += 1.0 * np.exp(-((i - r) ** 2) / (2 * qrs_width ** 2))
+            x[i] += 0.18 * np.exp(-((i - (r - int(0.18 * fs))) ** 2) / (2 * p_width ** 2))
+            x[i] += 0.30 * np.exp(-((i - (r + int(0.25 * fs))) ** 2) / (2 * t_width ** 2))
+
+    x = x - np.mean(x)
+    x = x / np.max(np.abs(x))
+
     return n, t, x
+
+
+def read_ecg_file(uploaded_file):
+    try:
+        raw = uploaded_file.read().decode("utf-8", errors="ignore")
+        values = []
+
+        for line in raw.splitlines():
+            line = line.replace(",", " ")
+            parts = line.split()
+
+            nums = []
+            for p in parts:
+                try:
+                    nums.append(float(p))
+                except:
+                    pass
+
+            if len(nums) == 1:
+                values.append(nums[0])
+            elif len(nums) >= 2:
+                values.append(nums[1])
+
+        if len(values) < 10:
+            return None
+
+        x = np.array(values, dtype=float)
+        x = x - np.mean(x)
+
+        max_val = np.max(np.abs(x))
+        if max_val != 0:
+            x = x / max_val
+
+        return x
+
+    except:
+        return None
 
 
 def get_window(window_type, width):
     if window_type == "Rectangular":
         return np.ones(width)
-    if window_type == "Bartlett":
+    elif window_type == "Bartlett":
         return np.bartlett(width)
-    if window_type == "Hanning":
+    elif window_type == "Hanning":
         return np.hanning(width)
-    if window_type == "Hamming":
+    elif window_type == "Hamming":
         return np.hamming(width)
-    if window_type == "Blackman":
+    elif window_type == "Blackman":
         return np.blackman(width)
     return np.ones(width)
 
@@ -140,16 +181,15 @@ def compute_stft(x, fs, width, overlap, jumlah_window, window_type):
         start = i * step
         end = start + width
 
-        if end > len(x):
-            segment = np.zeros(width)
-            available = len(x) - start
-            if available > 0:
-                segment[:available] = x[start:]
-        else:
-            segment = x[start:end]
+        segment = np.zeros(width)
+
+        if start < len(x):
+            available = min(width, len(x) - start)
+            segment[:available] = x[start:start + available]
 
         segment_windowed = segment * win
         mag = np.abs(np.fft.rfft(segment_windowed)) / width
+
         specs.append(mag)
         times.append((start + width / 2) / fs)
 
@@ -159,9 +199,9 @@ def compute_stft(x, fs, width, overlap, jumlah_window, window_type):
     return np.array(times), freqs, specs
 
 
-def fig_signal(n, x, title, color="red", width=8, height=2.6):
+def fig_signal(n, x, title, width=8, height=2.7):
     fig, ax = plt.subplots(figsize=(width, height), dpi=120)
-    ax.plot(n, x, color=color, linewidth=1)
+    ax.plot(n, x, color="red", linewidth=1)
     ax.set_title(title, fontsize=11)
     ax.set_xlabel("n sample", fontsize=8)
     ax.set_ylabel("Amplitude", fontsize=8)
@@ -171,7 +211,7 @@ def fig_signal(n, x, title, color="red", width=8, height=2.6):
     return fig
 
 
-def fig_spectrum(f, mag, title, width=4.2, height=2.6):
+def fig_spectrum(f, mag, title, width=4.2, height=2.7):
     fig, ax = plt.subplots(figsize=(width, height), dpi=120)
     ax.plot(f, mag, color="red", linewidth=1)
     ax.set_title(title, fontsize=9)
@@ -183,8 +223,8 @@ def fig_spectrum(f, mag, title, width=4.2, height=2.6):
     return fig
 
 
-def fig_windowed(n, x, fs, width_win, overlap, w_index, window_type, jumlah_window):
-    fig, ax = plt.subplots(figsize=(8, 2.6), dpi=120)
+def fig_windowed(n, x, width_win, overlap, w_index, window_type, jumlah_window):
+    fig, ax = plt.subplots(figsize=(8, 2.7), dpi=120)
 
     ax.plot(n, x, color="lightgray", linewidth=0.7, alpha=0.45)
 
@@ -196,20 +236,20 @@ def fig_windowed(n, x, fs, width_win, overlap, w_index, window_type, jumlah_wind
 
     for i in range(min(3, jumlah_window)):
         start = (w_index + i) * step
-        end = start + width_win
+
         if start >= len(x):
             continue
 
-        seg = np.zeros(width_win)
+        segment = np.zeros(width_win)
         available = min(width_win, len(x) - start)
-        seg[:available] = x[start:start + available]
+        segment[:available] = x[start:start + available]
 
-        seg_win = seg * win
+        segment_windowed = segment * win
         nn = np.arange(start, start + width_win)
 
         ax.plot(
             nn,
-            seg_win,
+            segment_windowed,
             color=colors[i],
             linewidth=1,
             label=labels[i]
@@ -230,9 +270,8 @@ def fig_windowed(n, x, fs, width_win, overlap, w_index, window_type, jumlah_wind
 
 
 def fig_specgram(times, freqs, spec):
-    fig, ax = plt.subplots(figsize=(6.6, 4.2), dpi=120)
+    fig, ax = plt.subplots(figsize=(6.3, 4.1), dpi=120)
     im = ax.pcolormesh(times, freqs, spec, shading="auto", cmap="jet")
-    ax.set_title("")
     ax.set_xlabel("Waktu (s)")
     ax.set_ylabel("Frekuensi (Hz)")
     ax.set_ylim(0, 500)
@@ -242,7 +281,7 @@ def fig_specgram(times, freqs, spec):
 
 
 def fig_3d(times, freqs, spec):
-    fig = plt.figure(figsize=(6.6, 4.2), dpi=120)
+    fig = plt.figure(figsize=(6.3, 4.1), dpi=120)
     ax = fig.add_subplot(111, projection="3d")
 
     T, F = np.meshgrid(times, freqs)
@@ -267,10 +306,17 @@ pilih_sinyal = st.sidebar.radio(
     ["Sinyal Buatan", "Sinyal ECG"]
 )
 
+uploaded_ecg = None
+if pilih_sinyal == "Sinyal ECG":
+    uploaded_ecg = st.sidebar.file_uploader(
+        "Upload Data ECG:",
+        type=["txt", "csv", "dat"]
+    )
+
 jumlah_data = st.sidebar.number_input(
     "Jumlah Data:",
     min_value=128,
-    max_value=4096,
+    max_value=10000,
     value=1024,
     step=1
 )
@@ -299,7 +345,7 @@ with col_start:
     mulai = st.number_input(
         "Mulai",
         min_value=0,
-        max_value=int(jumlah_data) - 1,
+        max_value=max(1, int(jumlah_data) - 1),
         value=280,
         step=1
     )
@@ -308,7 +354,7 @@ with col_end:
     sampai = st.number_input(
         "Sampai",
         min_value=1,
-        max_value=int(jumlah_data),
+        max_value=max(2, int(jumlah_data)),
         value=579,
         step=1
     )
@@ -361,7 +407,7 @@ st.sidebar.button("STFT")
 
 
 # =========================
-# DATA
+# DATA PROCESSING
 # =========================
 
 jumlah_data = int(jumlah_data)
@@ -372,14 +418,36 @@ jumlah_window = int(jumlah_window)
 
 if pilih_sinyal == "Sinyal Buatan":
     n, t, x = generate_signal(jumlah_data, fs)
+
 else:
-    n, t, x = generate_ecg_like(jumlah_data, fs)
+    if uploaded_ecg is not None:
+        ecg_data = read_ecg_file(uploaded_ecg)
+
+        if ecg_data is not None:
+            x = ecg_data
+            jumlah_data = len(x)
+            n = np.arange(jumlah_data)
+            t = n / fs
+            st.sidebar.success("Data ECG berhasil diupload")
+        else:
+            st.sidebar.error("File ECG tidak bisa dibaca")
+            n, t, x = generate_ecg_like(jumlah_data, fs)
+
+    else:
+        n, t, x = generate_ecg_like(jumlah_data, fs)
+        st.sidebar.info("Belum upload ECG, memakai contoh ECG")
+
 
 if mode_data == "Ambil Data ke :":
     mulai = int(mulai)
     sampai = int(sampai)
+
     if sampai <= mulai:
         sampai = mulai + 1
+
+    mulai = max(0, min(mulai, len(x) - 1))
+    sampai = max(mulai + 1, min(sampai, len(x)))
+
     x_process = np.zeros_like(x)
     x_process[mulai:sampai] = x[mulai:sampai]
 else:
@@ -387,7 +455,7 @@ else:
 
 
 # =========================
-# MAIN CONTENT
+# MAIN DISPLAY
 # =========================
 
 st.title("Time-Frequency Analysis - STFT")
@@ -397,10 +465,16 @@ f_in, mag_in = spectrum(x, fs)
 col1, col2 = st.columns([2.2, 1])
 
 with col1:
-    st.pyplot(fig_signal(n, x, "Sinyal Input", width=8, height=2.7), use_container_width=True)
+    st.pyplot(
+        fig_signal(n, x, "Sinyal Input", width=8, height=2.7),
+        use_container_width=True
+    )
 
 with col2:
-    st.pyplot(fig_spectrum(f_in, mag_in, "Spectrum Sinyal Input", width=4.1, height=2.7), use_container_width=True)
+    st.pyplot(
+        fig_spectrum(f_in, mag_in, "Spectrum Sinyal Input", width=4.1, height=2.7),
+        use_container_width=True
+    )
 
 st.markdown("---")
 
@@ -411,7 +485,6 @@ with col3:
         fig_windowed(
             n,
             x_process,
-            fs,
             lebar_window,
             overlap,
             w_index,
@@ -424,9 +497,9 @@ with col3:
 with col4:
     step = max(1, lebar_window - overlap)
     start = w_index * step
-    end = start + lebar_window
 
     segment = np.zeros(lebar_window)
+
     if start < len(x_process):
         available = min(lebar_window, len(x_process) - start)
         segment[:available] = x_process[start:start + available]
@@ -458,8 +531,14 @@ col5, col6 = st.columns([1.15, 1])
 
 with col5:
     st.markdown("### 2D Spectrogram")
-    st.pyplot(fig_specgram(times, freqs, spec), use_container_width=True)
+    st.pyplot(
+        fig_specgram(times, freqs, spec),
+        use_container_width=True
+    )
 
 with col6:
     st.markdown("### 3D Spectrogram")
-    st.pyplot(fig_3d(times, freqs, spec), use_container_width=True)
+    st.pyplot(
+        fig_3d(times, freqs, spec),
+        use_container_width=True
+    )
